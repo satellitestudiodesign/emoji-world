@@ -1,0 +1,38 @@
+body {
+  margin: 0;
+  font-size: 12px;
+  overflow: hidden;
+  background: black;
+}
+
+#emojiGlobe {
+    margin:0;
+    line-height: 12px;
+    letter-spacing: 0;
+    position: absolute;
+    white-space: nowrap; /* rows break only at <br>; emoji glyphs are wider than 12px */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.s{
+    width: 1em;
+    display: inline-block;
+}
+
+#ref {
+    position: fixed;
+    top: 0;
+    right: 0;
+    /* visibility: hidden; */
+}
+
+#fps {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    margin: 5px;
+  color:white;
+    /* visibility: hidden; */
+}

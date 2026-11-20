@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emoji World</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: black; }
+    /* Hidden but interactive: receives all mouse/touch input, emojis are drawn on top */
+    #map { position: fixed; inset: 0; opacity: 0; }
+    body.debug #map { opacity: .5; }
+    body.raw #map { opacity: 1; } body.raw #grid { visibility: hidden; } /* space: see the hidden class map */
+    #grid { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; } /* input falls through to the map */
+    /* invisible controls over their grid cells (ui.js draws them on the grid) */
+    .ctl { position: fixed; margin: 0; padding: 0; border: 0; background: none; color: transparent; cursor: pointer; }
+    input.ctl { cursor: text; caret-color: transparent; outline: none; font-size: 16px; } /* 16px: no iOS zoom on focus */
+    #fps, #credits { position: fixed; bottom: 0; margin: 5px; color: white; font: 11px sans-serif; }
+    #fps { right: 0; }
+    #credits { left: 0; opacity: .6; }
+    #credits a { color: inherit; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <canvas id="grid"></canvas>
+  <!-- <p id="fps">FPS</p> -->
+  <!-- <p id="credits">
+    <a href="https://openfreemap.org" target="_blank">OpenFreeMap</a>
+    © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a>
+    Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>
+    · Stars <a href="https://github.com/ofrohn/d3-celestial" target="_blank">d3-celestial</a>
+    · Biomes <a href="https://ecoregions.appspot.com/" target="_blank">RESOLVE Ecoregions 2017</a> (CC-BY 4.0),
+    <a href="https://www.naturalearthdata.com/" target="_blank">Natural Earth</a>
+    · Clouds <a href="https://clouds.matteason.co.uk/" target="_blank">Live Cloud Maps</a> (EUMETSAT data)
+    · Animals <a href="https://www.gbif.org" target="_blank">GBIF.org</a> occurrence data
+  </p> -->
+  <!-- plain scripts sharing one global scope, in dependency order -->
+  <script src="js/classes.js"></script>
+  <script src="js/biomes.js"></script>
+  <script src="js/style.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/labels.js"></script>
+  <script src="js/pois.js"></script>
+  <script src="js/sky.js"></script>
+  <script src="js/clouds.js"></script>
+  <script src="js/agents.js"></script>
+  <script src="js/cars.js"></script>
+  <script src="js/people.js"></script>
+  <script src="js/transit.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/readback.js"></script>
+  <script src="js/animals.js"></script>
+  <script src="js/draw.js"></script>
+</body>
+</html>

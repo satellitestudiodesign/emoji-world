@@ -1,0 +1,7 @@
+{
+  "name": "emoji-world-animals",
+  "private": true,
+  "type": "module",
+  "description": "Build data/animals.json from GBIF occurrence counts (run: npm install && node build.mjs)",
+  "devDependencies": { "@mapbox/vector-tile": "2.0.3", "pbf": "4.0.1" }
+}
