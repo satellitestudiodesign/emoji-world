@@ -7,7 +7,7 @@ const TRACTOR_SHARE = 0.4, FARM_IDX = classList.indexOf(CLASSES.farmland);
 // farmland on the hidden map one cell around lngLat?
 function nearFarm(ll) {
   if (!pixels) return false;
-  const q = map.project(ll), sx = pixW / innerWidth, sy = pixH / innerHeight;
+  const q = map.project(ll), sx = pixW / vw, sy = pixH / vh;
   return [[-cell, 0], [cell, 0], [0, -cell], [0, cell]].some(([dx, dy]) => {
     const x = Math.floor((q.x + dx) * sx), y = Math.floor((q.y + dy) * sy);
     if (x < 0 || y < 0 || x >= pixW || y >= pixH) return false;

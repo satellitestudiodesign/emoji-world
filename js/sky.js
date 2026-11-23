@@ -48,6 +48,12 @@ const PLANETS = [
   ['🪐', 'Saturn', [9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448],
     [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794]],
 ];
+const OUTER_PLANETS = [ // solar system view only (ui.js): too faint to show in the sky
+  ['🟢', 'Uranus', [19.18916464, 0.04725744, 0.77263783, 313.23810451, 170.95427630, 74.01692503],
+    [0.00196176, -0.00004397, -0.00242939, 428.48202785, 0.40805281, 0.04240589]],
+  ['🔵', 'Neptune', [30.06992276, 0.00859048, 1.77004347, -55.12002969, 44.96476227, 131.78422574],
+    [0.00026291, 0.00005105, 0.00035372, 218.45945325, -0.32241464, -0.01262724]],
+];
 const EARTH = [[1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0],
   [0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0]];
 
@@ -86,10 +92,10 @@ function subsolar(date = new Date()) {
 const starEmoji = (mag) => (mag < 1 ? '🌟' : mag < 3 ? '⭐' : '✨');
 const STAR_BRIGHT = 2; // stars brighter than this magnitude are not dimmed
 
-let starVecs = []; // [x, y, z, emoji, dimmed, name] unit vectors in the celestial frame
+let starVecs = []; // [x, y, z, emoji, dimmed, name, mag] unit vectors in the celestial frame
 fetch('data/stars.json').then((r) => r.json()).then((stars) => {
   starVecs = stars.map(([ra, dec, mag, name]) => [
-    Math.cos(dec * RAD) * Math.cos(ra * RAD), Math.cos(dec * RAD) * Math.sin(ra * RAD), Math.sin(dec * RAD), starEmoji(mag), mag >= STAR_BRIGHT, name]);
+    Math.cos(dec * RAD) * Math.cos(ra * RAD), Math.cos(dec * RAD) * Math.sin(ra * RAD), Math.sin(dec * RAD), starEmoji(mag), mag >= STAR_BRIGHT, name, mag]);
   map.triggerRepaint();
 });
 
@@ -118,13 +124,13 @@ function computeStars() {
   const north = [-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d)];
   const right = east.map((v, i) => v * Math.cos(b) - north[i] * Math.sin(b));
   const up = north.map((v, i) => v * Math.cos(b) + east[i] * Math.sin(b));
-  const f = (innerHeight / 2) / Math.tan(((map.transform.fov ?? 36.87) * RAD) / 2);
+  const f = (vh / 2) / Math.tan(((map.transform.fov ?? 36.87) * RAD) / 2);
   for (const [x, y, z, emoji, dimmed, name] of [...bodies, ...planetVecs(now), ...starVecs]) {
     const depth = -(x * out[0] + y * out[1] + z * out[2]); // along the view direction
     if (depth < 0.1) continue; // behind the camera
-    const px = innerWidth / 2 + f * (x * right[0] + y * right[1] + z * right[2]) / depth;
-    const py = innerHeight / 2 - f * (x * up[0] + y * up[1] + z * up[2]) / depth;
-    const col = Math.floor(px / cell), r = Math.floor(py / cell);
+    const px = vw / 2 + f * (x * right[0] + y * right[1] + z * right[2]) / depth;
+    const py = vh / 2 - f * (x * up[0] + y * up[1] + z * up[2]) / depth;
+    const col = cellCol(px), r = cellRow(py);
     if (emoji === SUN || emoji === MOON) { // the globe covers discs since stars only fill space
       const rad = emoji === SUN ? DISC_RADIUS
         : Math.min(MOON_MAX_RADIUS, DISC_RADIUS * 2 ** (map.getZoom() - MOON_ZOOM_REF));
@@ -190,7 +196,7 @@ function projectHeight(lng, lat, h) {
   const dx = x, dy = y, dz = z - cz, A = dx * dx + dy * dy + dz * dz, B = 2 * cz * dz, C = cz * cz - R * R;
   const disc = B * B - 4 * A * C;
   if (disc > 0 && (-B - Math.sqrt(disc)) / (2 * A) < 0.999) return null;
-  return { x: innerWidth / 2 + D * x / depth, y: innerHeight / 2 - D * y / depth };
+  return { x: vw / 2 + D * x / depth, y: vh / 2 - D * y / depth };
 }
 
 // Cell index of the ISS at its real height, or -1 (no data yet, hidden, off screen)
@@ -206,6 +212,6 @@ function issCell() {
   }
   const p = projectHeight(lng, lat, ISS_KM);
   if (!p) return -1;
-  const col = Math.floor(p.x / cell), r = Math.floor(p.y / cell);
+  const col = cellCol(p.x), r = cellRow(p.y);
   return col < 0 || col >= cols || r < 0 || r >= rows ? -1 : r * cols + col;
 }

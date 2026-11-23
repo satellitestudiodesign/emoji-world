@@ -2,17 +2,16 @@
 // Wild animals: GBIF occurrence counts per 2° cell, the most characteristic land and water taxa of each cell.
 // Domestic animals: on farmland, no data needed.
 const ANIMAL_MINZOOM = 15, ANIMAL_MAXZOOM = 24;
-const ANIMAL_SHARE = 0.03; // share of eligible cells that show an animal
+const ANIMAL_SHARE = 0.003; // share of eligible cells that show an animal: rare, a find not a pattern
 const DOMESTIC = [['🐄', 'Cow'], ['🐄', 'Cow'], ['🐑', 'Sheep'], ['🐑', 'Sheep'], ['🐐', 'Goat'], ['🐖', 'Pig'],
   ['🐓', 'Chicken'], ['🐎', 'Horse']];
 const classIdx = (k) => classList.indexOf(CLASSES[k]);
 const WILD_LAND = new Set(['land', 'ground', 'wood', 'grass', 'sand', 'ice', 'rock', 'marsh'].map(classIdx));
 classList.forEach((cls, i) => { if (cls.biome) WILD_LAND.add(i); });
 const FARM = classIdx('farmland');
-// town animals (zoomed in): pets around homes, rats among big buildings, water birds on lakes/rivers;
-// homes 1/3 and big buildings 1/6 of ANIMAL_SHARE (they fill the screen in a city)
-const TOWN = new Set(['residential', 'house'].map(classIdx)), CITY = new Set(['building', 'tower', 'commercial'].map(classIdx));
-const PETS = [['🐈', 'Cat'], ['🐈', 'Cat'], ['🐈‍⬛', 'Cat'], ['🐕', 'Dog'], ['🐕', 'Dog']];
+// none in towns: a cell within one cell of these shows no animal (draw.js)
+const URBAN = new Set(['residential', 'commercial', 'industrial', 'house', 'building', 'tower', 'pavement'].map(classIdx));
+// water birds on lakes/rivers
 const LAKE_IDX = classIdx('lake');
 const BIRDS = [['🦆', 'Duck'], ['🦆', 'Duck'], ['🦢', 'Swan']];
 
@@ -32,8 +31,6 @@ fetch('data/animals.json').then((r) => r.json()).then(({ grid, animals: list, ce
 function animalAt(best, hash, mx, my) {
   if (cellHash(hash, 7) % 1000 >= ANIMAL_SHARE * 1000) return null;
   if (best === FARM) return DOMESTIC[cellHash(hash, 13) % DOMESTIC.length];
-  if (TOWN.has(best)) return cellHash(hash, 17) % 3 ? null : PETS[cellHash(hash, 13) % PETS.length];
-  if (CITY.has(best)) return cellHash(hash, 17) % 6 ? null : ['🐀', 'Rat'];
   if (best === LAKE_IDX) return BIRDS[cellHash(hash, 13) % BIRDS.length];
   const where = best === WATER ? animals.water : WILD_LAND.has(best) ? animals.land : null;
   if (!where) return null;

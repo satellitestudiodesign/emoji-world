@@ -12,10 +12,13 @@
     /* Hidden but interactive: receives all mouse/touch input, emojis are drawn on top */
     #map { position: fixed; inset: 0; opacity: 0; }
     body.debug #map { opacity: .5; }
-    body.raw #map { opacity: 1; } body.raw #grid { visibility: hidden; } /* space: see the hidden class map */
-    #grid { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; } /* input falls through to the map */
+    body.raw #map { opacity: 1; } body.raw #grid, body.raw #ui { visibility: hidden; } /* space: see the hidden class map */
+    /* input falls through to the map; #grid is sized and slid by map.js/draw.js, #ui (controls) stays put */
+    #grid { position: fixed; left: 0; top: 0; pointer-events: none; }
+    #ui { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     /* invisible controls over their grid cells (ui.js draws them on the grid) */
     .ctl { position: fixed; margin: 0; padding: 0; border: 0; background: none; color: transparent; cursor: pointer; }
+    input[type=range].ctl { opacity: 0; cursor: pointer; } /* the track is drawn on the grid (ui.js) */
     input.ctl { cursor: text; caret-color: transparent; outline: none; font-size: 16px; } /* 16px: no iOS zoom on focus */
     #fps, #credits { position: fixed; bottom: 0; margin: 5px; color: white; font: 11px sans-serif; }
     #fps { right: 0; }
@@ -26,14 +29,15 @@
 <body>
   <div id="map"></div>
   <canvas id="grid"></canvas>
+  <canvas id="ui"></canvas>
   <!-- <p id="fps">FPS</p> -->
   <!-- <p id="credits">
     <a href="https://openfreemap.org" target="_blank">OpenFreeMap</a>
     © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a>
     Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>
     · Stars <a href="https://github.com/ofrohn/d3-celestial" target="_blank">d3-celestial</a>
-    · Biomes <a href="https://ecoregions.appspot.com/" target="_blank">RESOLVE Ecoregions 2017</a> (CC-BY 4.0),
-    <a href="https://www.naturalearthdata.com/" target="_blank">Natural Earth</a>
+    · Land cover <a href="https://land.copernicus.eu/global/products/lc" target="_blank">Copernicus Global Land Service LC100</a> (CC-BY 4.0),
+    terrain <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank">AWS Terrain Tiles</a>
     · Clouds <a href="https://clouds.matteason.co.uk/" target="_blank">Live Cloud Maps</a> (EUMETSAT data)
     · Animals <a href="https://www.gbif.org" target="_blank">GBIF.org</a> occurrence data
   </p> -->
@@ -43,8 +47,7 @@
   <script src="js/style.js"></script>
   <script src="js/map.js"></script>
   <script src="js/labels.js"></script>
-  <script src="js/pois.js"></script>
-  <script src="js/sky.js"></script>
+  <script src="js/pois.js"></script>  <script src="js/sky.js"></script>
   <script src="js/clouds.js"></script>
   <script src="js/agents.js"></script>
   <script src="js/cars.js"></script>
@@ -54,5 +57,6 @@
   <script src="js/readback.js"></script>
   <script src="js/animals.js"></script>
   <script src="js/draw.js"></script>
+  <script src="js/sound.js"></script>
 </body>
 </html>

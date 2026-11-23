@@ -7,13 +7,14 @@ function cellHash(col, r) {
 
 const ANIM_MS = 300, ANIM_PERIOD = 6; // redraw tick; wave cells re-roll every ANIM_PERIOD ticks (~2s)
 // Waves: water cells within COAST_CELLS of land, from WAVE_MINZOOM; 🌊 comes and goes over time
-const WAVE_MINZOOM = 5, COAST_CELLS = 1, WAVES = ['💦', '💦', '💦', '💦', '🌊']; // 1 in 5 wave cells shows 🌊
+const WAVE_MINZOOM = 7, COAST_CELLS = 1, WAVES = ['💦', '💦', '💦', '💦', '🌊']; // 1 in 5 wave cells shows 🌊
 // From INTERP_MINZOOM the map position of a cell is interpolated (in Mercator) between exact positions
 // every INTERP_STEP cells of a row; below it the globe curves too much and every cell is exact.
 const INTERP_MINZOOM = 6, INTERP_STEP = 8;
 
 // --- Per-frame pipeline ----------------------------------------------------
 const WATER = classList.indexOf(CLASSES.water), LAKE = classList.indexOf(CLASSES.lake);
+const SAND = classList.indexOf(CLASSES.sand);
 // cells agents may show on (not over buildings/water): thin lines often lose their cell to the area around
 const classSet = (...names) => new Set(names.map((k) => classList.indexOf(CLASSES[k])));
 const CAR_CELLS = classSet('road', 'highway', 'pavement');
@@ -26,7 +27,11 @@ const AREA_FILL = {
   sport: { areas: classSet('sport') },
   poiSchool: { areas: classSet('school'), near: BUILDINGS, max: FILL_MAX },
   poiHospital: { areas: classSet('hospital'), near: BUILDINGS, max: FILL_MAX },
+  stadium: { areas: classSet('sport') }, // only where no pitch POI filled the grounds first (VENUES below)
 };
+// Sport venues on a pitch area filled by a pitch POI show that sport (⚾ not 🏟️) and give the area their name (pitch
+// POIs are mostly unnamed): the name then shows on hover over any cell of it
+const VENUES = new Set(['stadium', 'gym', 'swimming', 'iceRink']), VENUE_REACH = 2; // cells searched around the venue
 // every other POI fills the real outline of the building it is in (none: just its cell), except street furniture and
 // outdoor spots
 const IN_BUILDING = 'building';
@@ -36,34 +41,28 @@ const NO_FILL = new Set(['bus', 'parking', 'atm', 'toilets', 'drinking', 'bicycl
   'picnic', 'dogPark', 'motoParking', 'bikeParking', 'gate']);
 const fillRule = (kind) => AREA_FILL[kind] || (NO_FILL.has(kind) ? null : IN_BUILDING);
 
-// Seasons by month and hemisphere, none in the tropics: share of eligible cells (by world hash) and what they show
-const TREES = classSet('wood', 'forest', 'land', 'olive'), OPEN = classSet('grass', 'ground', 'farmland');
-const SEASONS = {
-  spring: { cells: new Set([...TREES, ...OPEN]), share: 0.05, emojis: ['🌸'] },
-  autumn: { cells: TREES, share: 0.4, emojis: ['🍂', '🍁'] },
-  winter: { cells: new Set([...TREES, ...OPEN]), share: 0.03, emojis: ['⛄', '☃️'], minLat: 40 },
-};
-const SEASON_CELLS = SEASONS.spring.cells;
-const SEASON_OF_MONTH = ['winter', 'winter', 'spring', 'spring', 'spring', null, null, null, 'autumn', 'autumn', 'autumn', 'winter'];
 // Boats placed (not moving) on lakes/rivers and on the sea next to the coast: share of those cells
 const PLACED_BOATS = { lake: ['⛵', '🚣'], coast: ['🚤', '⛵'] }, PLACED_BOAT_SHARE = 0.008;
 
 // Turns the latest map pixels (readback.js) into emoji cells and paints the changed rows
 function draw() {
   if (!pixels) return;
-  const labels = computeLabels();
+  snapGrid();
+  hoverIdx = printing ? -1 : hoverCell(); // no hover name on a poster
+  const labels = toggles.labels ? computeLabels() : (placeTargets = new Map()); // off: no labels, nothing to click
   const ui = computeUi();
   const w = pixW, h = pixH;
 
-  const sx = w / innerWidth, sy = h / innerHeight; // map px per CSS px (1 with pixelRatio 1)
-  const sun = map.getZoom() < NIGHT_MAXZOOM ? subsolar() : null;
+  const sx = w / vw, sy = h / vh; // map px per CSS px (1 with pixelRatio 1)
+  const sky = map.getZoom() < NIGHT_MAXZOOM; // stars, Sun, Moon in space
+  const sun = sky ? subsolar() : null; // night side dimming
   // night opacity goes from NIGHT_OPACITY to 1 across the fade, applied to every .n span via a CSS variable
   const nightFade = Math.min(1, Math.max(0, (NIGHT_MAXZOOM - map.getZoom()) / NIGHT_FADE));
   const nightOpacity = 1 - (1 - NIGHT_OPACITY) * nightFade;
-  const starCells = sun ? computeStars() : null;
+  const starCells = sky ? computeStars() : null;
   // like a MapLibre ['interpolate', ['linear'], ['zoom'], 6, 1, 8, 0] opacity, done here since clouds aren't a map layer
   const cloudFade = Math.min(1, Math.max(0, (CLOUD_MAXZOOM - map.getZoom()) / CLOUD_FADE));
-  const cloudy = clouds && cloudFade > 0;
+  const cloudy = cloudFade > 0 && clouds;
   // same fade for biomes: share of biome cells kept (the rest show plain ground)
   const biomeFade = Math.min(1, Math.max(0, (BIOME_MAXZOOM + BIOME_FADE - map.getZoom()) / BIOME_FADE));
   const ground = CLASSES.ground.variants;
@@ -71,8 +70,7 @@ function draw() {
   // ceil: world cells never bigger than screen cells, so neighbours don't share a value (no twin columns)
   const worldCells = 512 * 2 ** Math.ceil(map.getZoom()) / cell;
   const tick = Date.now() / ANIM_MS;
-  const poiCells = map.getZoom() >= SPORT_MINZOOM ? computePois() : null;
-  const animalsOn = animals && map.getZoom() >= ANIMAL_MINZOOM && map.getZoom() <= ANIMAL_MAXZOOM;
+  const poiCells = map.getZoom() >= SPORT_MINZOOM ? computePois() : null;  const animalsOn = animals && map.getZoom() >= ANIMAL_MINZOOM && map.getZoom() <= ANIMAL_MAXZOOM;
   const carCells = map.getZoom() >= CAR_MINZOOM ? computeCars() : null;
   const boatCells = map.getZoom() >= BOAT_MINZOOM ? computeBoats() : null;
   const trainCells = map.getZoom() >= TRAIN_MINZOOM ? computeTrains() : null;
@@ -81,7 +79,7 @@ function draw() {
   // any land (known non-water class) at the centres of the cells within COAST_CELLS?
   const near = (col, r, test) => {
     for (let dr = -COAST_CELLS; dr <= COAST_CELLS; dr++) for (let dc = -COAST_CELLS; dc <= COAST_CELLS; dc++) {
-      const x = Math.floor((col + dc + 0.5) * cell * sx), y = Math.floor((r + dr + 0.5) * cell * sy);
+      const x = Math.floor(cellX(col + dc) * sx), y = Math.floor(cellY(r + dr) * sy);
       if (x < 0 || y < 0 || x >= w || y >= h) continue;
       const p = ((h - 1 - y) * w + x) * 4;
       if (pixels[p + 3] !== 255) continue;
@@ -95,7 +93,6 @@ function draw() {
   if (poiCells) for (const [idx, [, , kind]] of poiCells) {
     if (kind === 'pier' && !near(idx % cols, Math.floor(idx / cols), (i) => i === WATER || i === LAKE)) poiCells.delete(idx);
   }
-  const month = new Date().getMonth();
   const placedBoats = map.getZoom() >= BOAT_MINZOOM;
   const step = map.getZoom() >= INTERP_MINZOOM ? INTERP_STEP : 1;
   const needLL = !!(sun || cloudy);
@@ -109,8 +106,9 @@ function draw() {
   };
   // class index of the grid cell (most hidden-map pixels, weighted by priority), -1 = space
   const bestClass = (col, r) => {
-    const x0 = Math.floor(col * cell * sx), x1 = Math.floor((col + 1) * cell * sx);
-    const y0 = Math.floor(r * cell * sy), y1 = Math.floor((r + 1) * cell * sy);
+    // offset grid: the first/last rows and columns reach past the map image, clamp (x would wrap into the next row)
+    const x0 = Math.max(0, Math.floor((col * cell + gridOX) * sx)), x1 = Math.min(w, Math.floor(((col + 1) * cell + gridOX) * sx));
+    const y0 = Math.max(0, Math.floor((r * cell + gridOY) * sy)), y1 = Math.min(h, Math.floor(((r + 1) * cell + gridOY) * sy));
     let nTouched = 0;
     for (let y = y0; y < y1; y += SAMPLE_STEP) {
       const row = (h - 1 - y) * w; // GL origin is bottom-left
@@ -132,22 +130,30 @@ function draw() {
   };
   // areas take the emoji of the POI inside them (AREA_FILL): flood fill over touching cells of the POI's area
   // classes from every POI at once, so touching areas split between their POIs (nearest wins)
-  const areaFill = new Map(); // idx -> [emoji, fill rule, steps from the POI or its area, POI name]
+  const areaFill = new Map(); // idx -> [emoji, fill rule, steps from the POI or its area, POI name, POI cell]
   if (poiCells) {
     const queue = [], owners = new Map(); // building rings -> [[col, row, emoji, name]] of the POIs in it
     for (const [idx, [emoji, name, kind, buildings]] of poiCells) {
       const rule = fillRule(kind);
       if (!rule) continue;
-      areaFill.set(idx, [emoji, rule, 0, name]);
+      areaFill.set(idx, [emoji, rule, 0, name, idx]);
+      if (kind === 'stadium') continue; // after the pitches (VENUES)
       if (rule !== IN_BUILDING) { queue.push(idx); continue; }
       for (const building of buildings || []) {
         if (!owners.has(building)) owners.set(building, []);
         owners.get(building).push([idx % cols + 0.5, Math.floor(idx / cols) + 0.5, emoji, name]);
       }
     }
+    for (const [col, r, emoji, name, kind, buildings] of offscreenPois) { // the same, for POIs just off the grid
+      if (fillRule(kind) !== IN_BUILDING) continue;
+      for (const building of buildings) {
+        if (!owners.has(building)) owners.set(building, []);
+        owners.get(building).push([col + 0.5, r + 0.5, emoji, name]);
+      }
+    }
     // each building's cells: inside its outline (projected to cell units), shared by the POIs in it (nearest wins)
     for (const [building, pois] of owners) {
-      const pr = building.map((ring) => ring.map((ll) => { const p = map.project(ll); return [p.x / cell, p.y / cell]; }));
+      const pr = building.map((ring) => ring.map((ll) => { const p = map.project(ll); return [(p.x - gridOX) / cell, (p.y - gridOY) / cell]; }));
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const [x, y] of pr[0]) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
       for (let r = Math.max(0, Math.floor(y0)); r <= Math.min(rows - 1, Math.floor(y1)); r++) {
@@ -159,49 +165,68 @@ function draw() {
             && BUILDINGS.has(bestClass(c, r)))) continue;
           let best = pois[0], bestD = Infinity;
           for (const o of pois) { const d = (o[0] - c - 0.5) ** 2 + (o[1] - r - 0.5) ** 2; if (d < bestD) { bestD = d; best = o; } }
-          areaFill.set(n, [best[2], IN_BUILDING, 0, best[3]]);
+          areaFill.set(n, [best[2], IN_BUILDING, 0, best[3], -1]);
         }
       }
     }
-    for (let q = 0; q < queue.length; q++) {
-      const idx = queue[q], col = idx % cols, r = (idx - col) / cols, [emoji, rule, d, name] = areaFill.get(idx);
+    let q = 0;
+    const flood = () => { for (; q < queue.length; q++) {
+      const idx = queue[q], col = idx % cols, r = (idx - col) / cols, [emoji, rule, d, name, owner] = areaFill.get(idx);
       for (const [c, rr] of [[col + 1, r], [col - 1, r], [col, r + 1], [col, r - 1]]) {
         const n = rr * cols + c;
         if (c < 0 || c >= cols || rr < 0 || rr >= rows || areaFill.has(n)) continue;
         const k = bestClass(c, rr), dn = rule.areas.has(k) ? 0 : rule.near?.has(k) && d < rule.max ? d + 1 : -1;
         if (dn < 0) continue;
-        areaFill.set(n, [emoji, rule, dn, name]); queue.push(n);
+        areaFill.set(n, [emoji, rule, dn, name, owner]); queue.push(n);
       }
+    } };
+    flood();
+    const named = new Map(); // pitch POI cell -> venue name
+    for (const [idx, [, name, kind, buildings]] of poiCells) {
+      if (!VENUES.has(kind)) continue;
+      const col = idx % cols, r = (idx - col) / cols;
+      let pitch = null;
+      for (let dr = -VENUE_REACH; dr <= VENUE_REACH && !pitch; dr++) for (let dc = -VENUE_REACH; dc <= VENUE_REACH; dc++) {
+        const c = col + dc, rr = r + dr, a = c >= 0 && c < cols && rr >= 0 && rr < rows && areaFill.get(rr * cols + c);
+        if (a && a[1] === AREA_FILL.sport) { pitch = a; break; }
+      }
+      if (pitch) {
+        poiCells.set(idx, [pitch[0], name, kind, buildings]);
+        areaFill.set(idx, [pitch[0], pitch[1], 0, name, pitch[4]]);
+        if (name && !pitch[3] && !named.has(pitch[4])) named.set(pitch[4], name);
+      } else if (kind === 'stadium') queue.push(idx); // no pitch: the stadium fills its grounds itself
     }
+    flood();
+    if (named.size) for (const a of areaFill.values()) if (!a[3] && named.has(a[4])) a[3] = named.get(a[4]);
   }
   const iss = issCell();
-  // name of the ISS, POI (or the area it fills), flag or sky body under the mouse, spelled on the grid
-  const hoverName = (iss >= 0 && hoverIdx === iss && ISS_NAME) || (poiCells && poiCells.get(hoverIdx)?.[1]) || areaFill.get(hoverIdx)?.[3] || flagNames.get(hoverIdx)
-    || (starCells && starCells.get(hoverIdx)?.[2]);
+  // name of the ISS, POI (or the area it fills), sky body, or city dot or country (low zoom) under the mouse, spelled on the grid
+  const hoverCity = cityAtCell(hoverIdx), hoverCountry = countryNameAtCell(hoverIdx), hoverFeature = featureAtCell(hoverIdx);
+  const hoverName = (iss >= 0 && hoverIdx === iss && ISS_NAME) || (poiCells && poiCells.get(hoverIdx)?.[1]) || areaFill.get(hoverIdx)?.[3]
+    || (starCells && starCells.get(hoverIdx)?.[2]) || areaNameAt(hoverIdx) || hoverCity?.name || hoverFeature?.name || hoverCountry;
   const hoverCells = hoverName ? hoverLabel(hoverName) : null;
+  // pointer over what a click zooms to (labels.js): place names, towns, city dots and countries at low zoom
+  map.getCanvas().style.cursor = placeTargets.has(hoverIdx) || hoverFeature?.zoom || hoverCity || hoverCountry ? 'pointer' : '';
+  const seen = soundOn ? new Uint32Array(classList.length) : null; // visible cells per class, for sound.js
+  let space = 0;
   const anchorX = new Float64Array(Math.ceil(cols / step) + 2), anchorY = new Float64Array(anchorX.length);
 
   for (let r = 0; r < rows; r++) {
     // exact Mercator positions every `step` cells (and the last cell) of this row
     if (step > 1) for (let k = 0; k * step < cols + step; k++) {
       const c = Math.min(k * step, cols - 1);
-      const m = maplibregl.MercatorCoordinate.fromLngLat(map.unproject([(c + 0.5) * cell, (r + 0.5) * cell]));
+      const m = maplibregl.MercatorCoordinate.fromLngLat(map.unproject([cellX(c), cellY(r)]));
       anchorX[k] = m.x; anchorY[k] = m.y;
     }
     for (let col = 0; col < cols; col++) {
       const idx = r * cols + col;
-      const u = ui.get(idx);
-      if (u !== undefined) { cells[idx] = u ? glyphId(u) : 0; continue; } // controls (ui.js)
       const label = (hoverCells && hoverCells.get(idx)) || labels.get(idx);
-      if (label) {
-        // flags (not letters) dim on the night side like the ground under them
-        const flagNight = !!sun && !label.startsWith('l:') && isNight(map.unproject([(col + 0.5) * cell, (r + 0.5) * cell]), sun);
-        cells[idx] = glyphId(label) | (flagNight ? DIM : 0); continue;
-      }
+      if (label) { cells[idx] = glyphId(label); continue; }
       if (idx === iss) { cells[idx] = glyphId('🛰️'); continue; } // over land, sea and space alike
       const poi = poiCells && poiCells.get(idx);
       if (poi) { cells[idx] = glyphId(poi[0]); continue; } // over whatever area is under it
       const best = bestClass(col, r);
+      if (seen) { if (best < 0) space++; else seen[best]++; }
       if (best < 0) {
         const star = starCells && starCells.get(idx); // space
         cells[idx] = star ? glyphId(star[0]) | (star[1] ? DIM : 0) : 0;
@@ -209,7 +234,7 @@ function draw() {
       }
       let mx, my, ll = null;
       if (step === 1) {
-        ll = map.unproject([(col + 0.5) * cell, (r + 0.5) * cell]);
+        ll = map.unproject([cellX(col), cellY(r)]);
         const m = maplibregl.MercatorCoordinate.fromLngLat(ll);
         mx = m.x; my = m.y;
       } else {
@@ -221,19 +246,23 @@ function draw() {
         if (needLL) ll = new maplibregl.MercatorCoordinate(((mx % 1) + 1) % 1, my).toLngLat();
       }
       const hash = cellHash(Math.floor(mx * worldCells), Math.floor(my * worldCells));
-      const cls = classList[best];
-      const fadedOut = cls.biome && ((hash >>> 18) & 1023) / 1024 >= biomeFade;
-      const v = fadedOut ? ground : cls.variants;
-      let emoji = (v.length === 1 ? v[0] : v[hash % v.length]) || '';
-      emoji = areaFill.get(idx)?.[0] || emoji;
-      if (SEASON_CELLS.has(best)) {
-        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) / RAD;
-        const s = Math.abs(lat) >= 23.5 && SEASONS[SEASON_OF_MONTH[lat < 0 ? (month + 6) % 12 : month]];
-        if (s && Math.abs(lat) >= (s.minLat || 0) && ((hash >>> 4) & 1023) / 1024 < s.share) {
-          emoji = s.emojis[cellHash(hash, 5) % s.emojis.length];
+      let cls = classList[best];
+      // soft biome edges: some cells borrow the class 1-2 cells away (one pixel read), so borders dither, not cut
+      if (cls.biome && ((hash >>> 8) & 7) < 3) {
+        const dc = ((hash >>> 11) % 5) - 2, dr = ((hash >>> 14) % 5) - 2;
+        const x = Math.floor(cellX(col + dc) * sx), y = Math.floor(cellY(r + dr) * sy);
+        if (x >= 0 && y >= 0 && x < w && y < h) {
+          const p = ((h - 1 - y) * w + x) * 4, n = pixels[p + 3] === 255 ? classAt(pixels, p) : -1;
+          if (n >= 0 && classList[n].biome) cls = classList[n];
         }
       }
-      const animal = animalsOn && animalAt(best, hash, mx, my);
+      const fadedOut = cls.biome && ((hash >>> 18) & 1023) / 1024 >= biomeFade;
+      let v = fadedOut ? ground : cls.variants;
+      if (best === SAND && !near(col, r, (i) => i === WATER || i === LAKE)) v = CLASSES.desert.variants; // dunes, not beach
+      let emoji = (v.length === 1 ? v[0] : v[hash % v.length]) || '';
+      emoji = areaFill.get(idx)?.[0] || emoji;
+      let animal = animalsOn && animalAt(best, hash, mx, my);
+      if (animal && near(col, r, (i) => URBAN.has(i))) animal = null; // not in towns
       if (animal) emoji = animal[0];
       if (peopleCells && PEOPLE_CELLS.has(best)) emoji = peopleCells.get(idx) || emoji;
       if (carCells && CAR_CELLS.has(best)) emoji = carCells.get(idx) || emoji; // a car wins over a walker
@@ -254,7 +283,10 @@ function draw() {
       cells[idx] = glyphId(emoji) | (night ? DIM : 0) | op << CLOUD_SHIFT;
     }
   }
+  if (seen) soundMix(seen, space);
   paintGrid(nightOpacity);
+  canvas.style.transform = `translate(${gridOX}px, ${gridOY}px)`;
+  paintUi(ui);
 }
 
 // --- Wiring ----------------------------------------------------------------

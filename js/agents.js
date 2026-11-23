@@ -134,7 +134,7 @@ function createFleet({ layers, spacing, speed, emojis, max = 400, scale = () => 
       if (n) Object.assign(ag, n, { d: n.d + n.dir * over, prev: ag.line });
       else {
         const q = map.project(p);
-        if (q.x < 0 || q.y < 0 || q.x > innerWidth || q.y > innerHeight) agents[k] = spawn(); // edge of loaded lines
+        if (q.x < 0 || q.y < 0 || q.x > vw || q.y > vh) agents[k] = spawn(); // edge of loaded lines
         else ag.dir = -ag.dir; // a real dead end on screen: U-turn
       }
     }
@@ -149,7 +149,7 @@ function createFleet({ layers, spacing, speed, emojis, max = 400, scale = () => 
     for (const ag of agents) {
       const { p: ll, i } = pointAt(ag.line, ag.d);
       const p = map.project(ll);
-      const col = Math.floor(p.x / cell), r = Math.floor(p.y / cell);
+      const col = cellCol(p.x), r = cellRow(p.y);
       if (col < 0 || col >= cols || r < 0 || r >= rows) continue;
       const pa = map.project(ag.line.pts[i - 1]), pb = map.project(ag.line.pts[i]);
       out.set(r * cols + col, (pb.x - pa.x) * ag.dir > 0 ? 'f:' + ag.emoji : ag.emoji);

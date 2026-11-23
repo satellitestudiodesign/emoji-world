@@ -1,0 +1,7 @@
+{
+  "name": "emoji-world-landcover",
+  "private": true,
+  "type": "module",
+  "description": "Build data/biomes.json from Copernicus land cover + terrain tiles (run: npm install && node build.mjs)",
+  "devDependencies": { "geotiff": "2.1.3", "pngjs": "7.0.0" }
+}

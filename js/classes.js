@@ -13,7 +13,7 @@ const CLASSES = {
   wood:        { emoji: '🌲', priority: 1 },
   grass:       { emoji: '🌿', priority: 1 },
   farmland:    { emoji: '🌾', priority: 1 },
-  sand:        { emoji: '🏖️', priority: 1 },
+  sand:        { emoji: '🏖️', priority: 1 },  // beaches only: inland sand shows as desert (draw.js)
   residential: { emoji: '🏘️', priority: 1 },
   industrial:  { emoji: '🏭', priority: 1 },
   commercial:  { emoji: '🏬', priority: 1 },
@@ -21,6 +21,7 @@ const CLASSES = {
   hospital:    { emoji: '🏥', priority: 1.5 },
   cemetery:    { emoji: '🪦', priority: 1.5 },
   sport:       { emoji: '🏟️', priority: 1.5 },
+  playArea:    { emoji: '🛝', priority: 1.5 },  // playground grounds (the 🛝 POI is `playground` below)
   airport:     { emoji: '✈️', priority: 2 },
   rock:        { emoji: '🪨', priority: 1 },  // bare rock, scree
   marsh:       { emoji: ['🌿', '🌿', '🪷'], priority: 1 },
@@ -33,18 +34,21 @@ const CLASSES = {
   military:    { emoji: '🪖', priority: 1.5 },
   themePark:   { emoji: '🎡', priority: 1.5 },
   zoo:         { emoji: ['🦁', '🐘', '🦒', '🌳'], priority: 1.5 },
-  // biomes (data/biomes.json), low zoom only; fade out to ground above BIOME_MAXZOOM
-  forest:      { emoji: '🌳', priority: 1, biome: true },
-  conifer:     { emoji: '🌲', priority: 1, biome: true },
+  // land cover tiles (data/landcover, tools/landcover/build.mjs), low zoom only; fade out to ground above BIOME_MAXZOOM
+  forest:      { emoji: ['🌳', '🌳', '🌳', '🌲'], priority: 1, biome: true },
+  conifer:     { emoji: ['🌲', '🌲', '🌲', '🌳'], priority: 1, biome: true },
   rockice:     { emoji: '🧊', priority: 1, biome: true },
   jungle:      { emoji: ['🌴', '🌴', '🌳'], priority: 1, biome: true },
   savanna:     { emoji: ['🌾', '🌾', '🌾', '🌳'], priority: 1, biome: true },
-  steppe:      { emoji: ['🌿', '🌿', '🌾'], priority: 1, biome: true },
+  steppe:      { emoji: ['🌿', '🌿', '🌾', '🌱'], priority: 1, biome: true },
   wetland:     { emoji: ['🌿', '🌿', '🪷'], priority: 1, biome: true },
-  tundra:      { emoji: ['🌱', '🌱', '🪨'], priority: 1, biome: true },
-  olive:       { emoji: ['🌳'], priority: 1, biome: true },  // mediterranean
-  desert:      { emoji: ['🏜️', '🏜️', '🏜️','🏜️','🏜️','🏜️','🏜️', '🌵'], priority: 1, biome: true },
-  mountain:    { emoji: ['⛰️', '⛰️', '🏔️'], priority: 1, biome: true },
+  tundra:      { emoji: ['🌱', '🌱', '🌿', '🪨'], priority: 1, biome: true },
+  scrub:       { emoji: ['🌿', '🌿', '🌱', '🌳'], priority: 1, biome: true },  // shrubland (mediterranean maquis etc.)
+  desert:      { emoji: ['🏜️', '🏜️', '🏜️', '🏜️', '🏜️', '🏜️', '🏜️', '🏜️', '🌵', '🪨'], priority: 1, biome: true },
+  mountain:    { emoji: ['⛰️', '⛰️', '⛰️', '🪨'], priority: 1, biome: true },
+  peaks:       { emoji: ['🏔️', '🏔️', '⛰️'], priority: 1, biome: true },  // above ~3800 m
+  crops:       { emoji: ['🌾', '🌾', '🌾', '🌱', '🌳'], priority: 1, biome: true },
+  town:        { emoji: ['🏘️', '🏘️', '🏢'], priority: 1, biome: true },
   // buildings, by height (OpenMapTiles has no building type)
   house:       { emoji: '🏠', priority: 1.2 },
   building:    { emoji: '🏫', priority: 1.2 },
@@ -126,16 +130,21 @@ const CLASSES = {
   yoga:        { emoji: '🧘', priority: 20 },
   peak:        { emoji: '🏔️', priority: 20 },
   volcano:     { emoji: '🌋', priority: 20 },
+  hill:        { emoji: '⛰️', priority: 20 },  // summit below PEAK_SNOW_ELE (style.js); appended last: land cover tiles bake class colours
 };
 
-const FONT_SIZE = 12; // px; bigger = fewer cells = faster
-const GAP = 1; // px of empty space between emojis, horizontally and vertically
+// Try icons without editing code: ?road=⬛&pavement=▫️ (comma = list, e.g. ?pavement=⬜,⬜,🧱)
+for (const [k, v] of new URLSearchParams(location.search)) if (CLASSES[k]) CLASSES[k].emoji = v.includes(',') ? v.split(',') : v;
+
+const FONT_SIZE = 14; // px; bigger = fewer cells = faster
+const GAP = -3; // px added between emojis, horizontally and vertically; negative = emojis overlap their neighbours
 // Hidden map resolution. 0.5 would mean 1/4 of the pixels to draw and read back, but MapLibre antialiases edges,
 // so lines and POI dots under ~1 device px turn into blended (ignored) colours: POIs and z13 streets vanish.
 const MAP_PIXEL_RATIO = 1;
 const SAMPLE_STEP = 2; // sample every Nth map pixel in each direction (use 1 with MAP_PIXEL_RATIO 0.5)
 
 // Auto-assign a unique color per class on a 6-level RGB grid (step 51).
+// The land cover tiles bake these colours: rerun tools/landcover/build.mjs after inserting or reordering classes.
 // ponytail: 215 classes max; blended line/circle edges can rarely land on a grid color.
 const classList = Object.values(CLASSES);
 classList.forEach((cls, i) => {

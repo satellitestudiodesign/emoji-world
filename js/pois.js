@@ -5,7 +5,9 @@ const POI_MINZOOM = 15;
 // sport pitches show from here (tile zoom 14 is the first with pitch points; z13 tiles only have the bare areas)
 const SPORT_MINZOOM = 14;
 // small street furniture (hundreds per district) only from STREET_MINZOOM
-const STREET_MINZOOM = 17, STREET = new Set(['bin', 'motoParking', 'bikeParking', 'gate', 'recycling', 'phone', 'info']);
+// shops: the shop class plus kinds that are shops in OSM but get their own class here
+const SHOPS = new Set(['shop', 'bakery', 'pharmacy', 'hairdresser', 'laundry', 'carDealer']);
+const SHOP_MINZOOM = 16, STREET_MINZOOM = 17, STREET = new Set(['bin', 'motoParking', 'bikeParking', 'gate', 'recycling', 'phone', 'info']);
 // OpenMapTiles poi `class` -> our class
 const POI = {
   restaurant: 'food', fast_food: 'fastfood', cafe: 'cafe', ice_cream: 'cafe', bar: 'bar', beer: 'bar',
@@ -83,10 +85,23 @@ const FOOD_WORDS = [
   [/pollo|chicken|kfc|wings/i, '🍗'], [/hot ?dog|frankfurt/i, '🌭'], [/horchat/i, '🥛'], [/pasta|italian|ristorante/i, '🍝'],
 ];
 const foodEmoji = (name) => FOOD_WORDS.find(([re]) => re.test(name))?.[1];
+// Famous monuments that have their own emoji, by the tile POI's English name (exact, as in the tiles). Only landmark
+// classes match (the bus stop "Tower Bridge" stays a bus stop). They fill the polygon under their point (buildingsAt).
+// No Eiffel Tower: 🗼 is Tokyo Tower. Not in the tiles as a named POI: Sydney Opera House, Angkor Wat, Osaka Castle.
+const FAMOUS = {
+  'Tokyo Tower': '🗼', 'Statue of Liberty': '🗽', Colosseum: '🏟️', Parthenon: '🏛️', Pantheon: '🏛️',
+  'Taj Mahal': '🕌', 'Hagia Sophia': '🕌', 'Sheikh Zayed Grand Mosque': '🕌', Kaaba: '🕋', 'Himeji Castle': '🏯',
+  'Neuschwanstein Castle': '🏰', 'The Great Torii': '⛩️', '10,000 Torii Gates': '⛩️', 'London Eye': '🎡',
+  'Golden Gate Bridge': '🌉', 'Tower Bridge': '🌉', 'Basilica of the Holy Family': '⛪', 'Cathedral of Notre Dame': '⛪',
+  "St. Peter's Dome": '⛪', Stonehenge: '🪨', 'Great Pyramid of Giza': '🔺', 'Pyramid of Khafre': '🔺',
+  'Pyramid of Menkaure': '🔺', 'Trevi Fountain': '⛲',
+};
+const FAMOUS_CLASSES = new Set(['attraction', 'monument', 'castle', 'place_of_worship', 'museum']);
+const famousEmoji = (p) => FAMOUS_CLASSES.has(p.class) && FAMOUS[p['name:en'] || p.name];
 // emoji of a POI feature; lists pick one per POI by its position (stable across redraws)
 function poiEmoji(p, lng, lat) {
   const kind = POI_SUB[p.subclass] || POI[p.class];
-  let e = sportEmoji(p) || (kind === 'shop' && SHOP[p.subclass])
+  let e = famousEmoji(p) || sportEmoji(p) || (kind === 'shop' && SHOP[p.subclass])
     || (['food', 'fastfood', 'cafe', 'bar'].includes(kind) && foodEmoji(p.name || ''))
     || (kind === 'castle' && /城|-j[oō]\b/.test(p.name || '') && '🏯') || CLASSES[kind].emoji;
   if (Array.isArray(e)) e = e[cellHash(Math.round(lng * 1e6), Math.round(lat * 1e6)) % e.length];
@@ -114,7 +129,7 @@ function queryPois() {
     .sort((a, b) => (a.properties.rank ?? 99) - (b.properties.rank ?? 99))
     .map(({ geometry: { coordinates: [lng, lat] }, properties: p }) =>
       [lng, lat, poiEmoji(p, lng, lat), p['name:latin'] || p.name || '',
-        sportEmoji(p) ? 'sport' : POI_SUB[p.subclass] || POI[p.class]]);
+        famousEmoji(p) ? 'famous' : sportEmoji(p) ? 'sport' : POI_SUB[p.subclass] || POI[p.class]]);
   // 🎣 at both ends of each pier's longest line (marinas map their pontoons as one pier of many lines);
   // draw() keeps only ends next to water (the tip)
   for (const f of map.querySourceFeatures('omt', { sourceLayer: 'transportation', filter: ['==', ['get', 'class'], 'pier'] })) {
@@ -125,6 +140,60 @@ function queryPois() {
   }
   const homes = buildingsAt(poiPts);
   poiPts.forEach((pt, i) => pt.push(homes[i]));
+  queryAreas();
+}
+
+// Named areas, for hover: the tiles carry the area and its name separately.
+// - parks and gardens: green area (landcover, subclass park/garden) + name on a poi point inside it
+// - squares: pedestrian area (transportation, path/pedestrian polygon) + name on a path line through it
+//   (transportation_name)
+// Each name goes to the smallest such area holding its point (or any vertex of its line); hovering anywhere in the
+// area shows the name. Smallest first, so a garden inside a park keeps its own name.
+// ponytail: an area cut by a tile border is two pieces, only the piece holding the point/line gets the name
+let namedAreas = []; // [name, rings], smallest area first
+const polygonsOf = (feats) => feats.flatMap(({ geometry: g }) => (g.type === 'Polygon' ? [g.coordinates]
+  : g.type === 'MultiPolygon' ? g.coordinates : [])).map((rings) => {
+  let a = 0; const ring = rings[0];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1]);
+  const xs = ring.map((v) => v[0]), ys = ring.map((v) => v[1]);
+  rings.bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; // cheap test before inside()
+  return [Math.abs(a), rings];
+}).sort((x, y) => x[0] - y[0]);
+const inBox = (x, y, [x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+function queryAreas() {
+  const q = (sourceLayer, filter) => map.querySourceFeatures('omt', { sourceLayer, filter });
+  const greens = polygonsOf(q('landcover', ['in', ['get', 'subclass'], ['literal', ['park', 'garden']]]));
+  const squares = polygonsOf(q('transportation', ['all', ['==', ['get', 'class'], 'path'],
+    ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'footway']]]]));
+  const found = new Map(); // rings -> [area, name]
+  const claim = (areas, name, pts) => {
+    if (!name) return;
+    const hit = areas.find(([, rings]) => pts.some(([x, y]) => inside(x, y, rings)));
+    if (hit && !found.has(hit[1])) found.set(hit[1], [hit[0], name]);
+  };
+  for (const f of q('poi', ['in', ['get', 'class'], ['literal', ['park', 'garden']]])) {
+    claim(greens, f.properties['name:latin'] || f.properties.name, [f.geometry.coordinates]);
+  }
+  // squares: the name whose line lies most inside (at least half its points), not a street just crossing it
+  const best = new Map(); // rings -> [share inside, name]
+  for (const f of q('transportation_name', ['==', ['get', 'class'], 'path'])) {
+    const name = f.properties['name:latin'] || f.properties.name, g = f.geometry;
+    const pts = g.type === 'LineString' ? g.coordinates : g.type === 'MultiLineString' ? g.coordinates.flat() : [];
+    if (!name || !pts.length) continue;
+    for (const [, rings] of squares) {
+      if (!pts.some(([x, y]) => inBox(x, y, rings.bbox))) continue;
+      const share = pts.filter(([x, y]) => inside(x, y, rings)).length / pts.length;
+      if (share >= 0.5 && share > (best.get(rings)?.[0] ?? 0)) best.set(rings, [share, name]);
+    }
+  }
+  for (const [a, rings] of squares) if (best.has(rings) && !found.has(rings)) found.set(rings, [a, best.get(rings)[1]]);
+  namedAreas = [...found].sort((x, y) => x[1][0] - y[1][0]).map(([rings, [, name]]) => [name, rings]);
+}
+// Name of the named area under a grid cell, or undefined
+function areaNameAt(idx) {
+  if (idx < 0 || map.getZoom() < SPORT_MINZOOM) return;
+  const ll = map.unproject([cellX(idx % cols), cellY(Math.floor(idx / cols))]);
+  return namedAreas.find(([, rings]) => inBox(ll.lng, ll.lat, rings.bbox) && inside(ll.lng, ll.lat, rings))?.[0];
 }
 
 // Point in polygon (even-odd, so holes work); rings = [[[x, y], ...], ...] in any one coordinate system
@@ -165,6 +234,10 @@ function buildingsAt(pts) {
   }
   return pts.map(([lng, lat, , , kind]) => {
     const bx = Math.floor(lng / B), by = Math.floor(lat / B), here = grid.get(bx + ',' + by) || [];
+    if (kind === 'famous') { // every building under it (towers and domes are mapped as stacked parts), else the site
+      const under = here.filter((rings) => inside(lng, lat, rings));
+      return under.length ? under : siteAt(lng, lat);
+    }
     const home = here.find((rings) => inside(lng, lat, rings));
     if (!LANDMARKS.has(kind)) return home && (ANY_SIZE.has(kind) || home.m2 <= MAX_BUILDING) ? [home] : [];
     const found = new Set(home ? [home] : []);
@@ -176,19 +249,36 @@ function buildingsAt(pts) {
     return [...found];
   });
 }
+// Smallest historic site (Stonehenge) or bridge (Golden Gate) outline under a famous POI with no building: [rings] or []
+// ponytail: a bridge cut by tile borders is several pieces, only the piece under the point fills
+function siteAt(lng, lat) {
+  const q = (sourceLayer, cls) => polygonsOf(map.querySourceFeatures('omt', { sourceLayer, filter: ['==', ['get', 'class'], cls] }));
+  const hit = [...q('park', 'historic'), ...q('transportation', 'bridge')].sort((a, b) => a[0] - b[0])
+    .find(([, rings]) => inBox(lng, lat, rings.bbox) && inside(lng, lat, rings));
+  return hit ? [hit[1]] : [];
+}
 // Query again only when the view moved (the kept margin shifts) or a tile arrived; done once the loads settle
 map.on('moveend', () => { poiDirty = true; });
 map.on('sourcedata', (e) => { if (e.sourceId === 'omt' && e.tile) poiDirty = true; });
 
 // Map(cellIndex -> [emoji, name, kind, buildings]) for the POIs on screen
+// POIs just off the grid still fill the part of their building that is on it (else the fill blinks at the edge)
+// ponytail: only building fills; sport/school/hospital grounds flood from the POI cell, so they still need it on screen
+const POI_FILL_MARGIN = 30; // cells around the grid
+let offscreenPois = []; // [col, row, emoji, name, kind, buildings], col/row outside the grid
 function computePois() {
   if (poiDirty && map.areTilesLoaded()) queryPois();
   const out = new Map();
-  const sportOnly = map.getZoom() < POI_MINZOOM, street = map.getZoom() < STREET_MINZOOM;
+  offscreenPois = [];
+  const sportOnly = map.getZoom() < POI_MINZOOM, street = map.getZoom() < STREET_MINZOOM, noShops = map.getZoom() < SHOP_MINZOOM;
   for (const [lng, lat, emoji, name, kind, buildings] of poiPts) {
-    if ((sportOnly && kind !== 'sport') || (street && STREET.has(kind))) continue;
-    const p = map.project([lng, lat]), col = Math.floor(p.x / cell), r = Math.floor(p.y / cell);
-    if (col < 0 || col >= cols || r < 0 || r >= rows) continue;
+    if ((sportOnly && kind !== 'sport' && kind !== 'famous') || (street && STREET.has(kind)) || (noShops && SHOPS.has(kind))) continue;
+    const p = map.project([lng, lat]), col = cellCol(p.x), r = cellRow(p.y);
+    if (col < 0 || col >= cols || r < 0 || r >= rows) {
+      const m = POI_FILL_MARGIN;
+      if (buildings && col >= -m && col < cols + m && r >= -m && r < rows + m) offscreenPois.push([col, r, emoji, name, kind, buildings]);
+      continue;
+    }
     const idx = r * cols + col;
     if (!out.has(idx)) out.set(idx, [emoji, name, kind, buildings]); // more important POI keeps the cell
   }

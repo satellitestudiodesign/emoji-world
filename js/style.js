@@ -3,6 +3,7 @@
 const lineWidth = (k = 1) => ['interpolate', ['exponential', 1.6], ['zoom'],
   5, 0.3 * k, 12, 0.6 * k, 15, 1.5 * k, 17, 4 * k, 19, 14 * k];
 
+const PEAK_SNOW_ELE = 2000; // m: summits at or above show 🏔️, below ⛰️
 const NOT_TUNNEL = ['!=', ['get', 'brunnel'], 'tunnel']; // subways/underpasses aren't visible from above
 const style = {
   version: 8,
@@ -10,8 +11,8 @@ const style = {
   sky: { 'atmosphere-blend': 0 },
   sources: {
     omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' },
-    // RESOLVE Ecoregions 2017 biomes (b = BIOME_NUM, 15 = rock & ice) + Natural Earth ranges (b = 0)
-    biomes: { type: 'geojson', data: 'data/biomes.json' },
+    // Copernicus LC100 land cover + relief, z0-4 (biomes.js)
+    landcover: { type: 'raster', tiles: [location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '') + 'data/landcover/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 4 },
   },
   layers: [
     { id: 'bg', type: 'background',
@@ -32,7 +33,7 @@ const style = {
         ['school', 'university', 'college', 'kindergarten'], c.school,
         'hospital', c.hospital, 'cemetery', c.cemetery, 'military', c.military, 'quarry', c.quarry,
         'theme_park', c.themePark, 'zoo', c.zoo,
-        ['stadium', 'pitch', 'playground'], c.sport, c.residential] } },
+        'playground', c.playArea, ['stadium', 'pitch'], c.sport, c.residential] } },
     // z15+: open space in town is street/sidewalk/plaza, show it as pavement
     { id: 'pavement', type: 'fill', source: 'omt', 'source-layer': 'landuse', minzoom: 15,
       filter: ['in', ['get', 'class'], ['literal', ['residential', 'suburb', 'neighbourhood', 'commercial', 'retail']]],
@@ -42,7 +43,7 @@ const style = {
       filter: ['in', ['get', 'class'], ['literal', ['stadium', 'pitch', 'playground', 'school', 'university', 'college',
         'kindergarten', 'hospital']]],
       paint: { 'fill-antialias': false, 'fill-color': ['match', ['get', 'class'], 'hospital', c.hospital,
-        ['school', 'university', 'college', 'kindergarten'], c.school, c.sport] } },
+        ['school', 'university', 'college', 'kindergarten'], c.school, 'playground', c.playArea, c.sport] } },
     { id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', minzoom: BIOME_MAXZOOM,
       paint: { 'fill-antialias': false, 'fill-color': c.grass } },
     { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water',
@@ -80,10 +81,17 @@ const style = {
     { id: 'highway', type: 'line', source: 'omt', 'source-layer': 'transportation',
       filter: ['all', ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary']]], NOT_TUNNEL],
       paint: { 'line-color': c.highway, 'line-width': lineWidth(3) } },
+    // summits: 🏔️ only when high, ⛰️ below; OMT `rank` (1 = most important in its tile) thins them out at lower zooms
     { id: 'peak', type: 'circle', source: 'omt', 'source-layer': 'mountain_peak', minzoom: 9,
-      filter: ['in', ['get', 'class'], ['literal', ['peak', 'volcano']]],
-      paint: { 'circle-color': ['match', ['get', 'class'], 'volcano', c.volcano, c.peak], 'circle-radius': 3,
+      filter: ['all', ['in', ['get', 'class'], ['literal', ['peak', 'volcano']]],
+        ['<=', ['coalesce', ['get', 'rank'], 99], ['step', ['zoom'], 2, 11, 5, 13, 99]]],
+      paint: { 'circle-color': ['case', ['==', ['get', 'class'], 'volcano'], c.volcano,
+        ['>=', ['coalesce', ['get', 'ele'], 0], PEAK_SNOW_ELE], c.peak, c.hill], 'circle-radius': 3,
         'circle-pitch-alignment': 'map' } },
+    // invisible (opacity 0: no class pixels), only for hover names and clicks (labels.js featureAtCell)
+    { id: 'placeHover', type: 'circle', source: 'omt', 'source-layer': 'place',
+      filter: ['in', ['get', 'class'], ['literal', ['city', 'town', 'village']]],
+      paint: { 'circle-radius': 6, 'circle-opacity': 0, 'circle-pitch-alignment': 'map' } },
     { id: 'city', type: 'circle', source: 'omt', 'source-layer': 'place', maxzoom: 11,
       filter: ['==', ['get', 'class'], 'city'],
       paint: { 'circle-color': c.city, 'circle-radius': 3, 'circle-pitch-alignment': 'map' } },
